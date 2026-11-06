@@ -1,0 +1,41 @@
+{
+  "name": "astrava-enterprise-asset-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ASTRAVA Enterprise Asset Intelligence and Lifecycle Platform",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n BACKEND,FRONTEND -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "start": "npm --prefix backend start",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "test": "npm --prefix backend test",
+    "lint": "npm --prefix frontend run lint",
+    "format": "prettier --write \"backend/src/**/*.js\" \"config/**/*.js\" \"frontend/src/**/*.{js,jsx,css}\""
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "bullmq": "^5.58.5",
+    "concurrently": "^9.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "express-rate-limit": "^8.1.0",
+    "ioredis": "^5.7.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.14.3",
+    "opossum": "^9.0.0",
+    "sequelize": "^6.37.7",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  }
+}
