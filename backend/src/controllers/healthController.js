@@ -1,28 +1,10 @@
 
 import { checkDatabaseHealth } from "../../../config/database.js";
-import { checkRedisHealth } from "../config/redis.js";
-import { checkQueueHealth } from "../queues/queueRegistry.js";
 
 export const getSystemHealth = async (req, res) => {
-  const [database, redis, queues] = await Promise.all([
-    checkDatabaseHealth(),
-    checkRedisHealth(),
-    checkQueueHealth()
-  ]);
+  const database = await checkDatabaseHealth();
 
-  const services = {
-    database: database.status,
-    redis: redis.status,
-    queues: Object.values(queues).every(
-      (status) => status === "healthy"
-    )
-      ? "healthy"
-      : "unhealthy"
-  };
-
-  const healthy = Object.values(services).every(
-    (status) => status === "healthy"
-  );
+  const healthy = database.status === "healthy";
 
   res.status(healthy ? 200 : 503).json({
     success: healthy,
@@ -30,7 +12,9 @@ export const getSystemHealth = async (req, res) => {
     status: healthy ? "healthy" : "degraded",
     timestamp: new Date().toISOString(),
     requestId: req.requestId,
-    services
+    services: {
+      database: database.status
+    }
   });
 };
 

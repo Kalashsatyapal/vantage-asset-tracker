@@ -4,9 +4,7 @@ import app from "./app.js";
 import env from "../../config/env.js";
 import logger from "../../config/logger.js";
 import { connectDatabase, disconnectDatabase } from "../../config/database.js";
-import { connectRedis, disconnectRedis } from "./config/redis.js";
-import { closeQueues } from "./queues/queueRegistry.js";
-
+import { initializeModels } from "./models/index.js";
 const server = http.createServer(app);
 
 let shuttingDown = false;
@@ -19,25 +17,23 @@ server.maxRequestsPerSocket = 1000;
 const startServer = async () => {
   try {
     await connectDatabase();
-    await connectRedis();
+    await initializeModels();
 
     server.listen(env.PORT, () => {
-      logger.info("ASTRAVA_SERVER_STARTED", {
+      logger.info("Vantage_SERVER_STARTED", {
         port: env.PORT,
         environment: env.NODE_ENV,
         pid: process.pid
       });
     });
   } catch (error) {
-    logger.error("ASTRAVA_STARTUP_FAILED", {
+    logger.error("Vantage_STARTUP_FAILED", {
       message: error.message,
       stack: error.stack
     });
 
     await Promise.allSettled([
       disconnectDatabase(),
-      disconnectRedis(),
-      closeQueues()
     ]);
 
     process.exitCode = 1;
@@ -51,12 +47,12 @@ const shutdown = async (signal) => {
 
   shuttingDown = true;
 
-  logger.warn("ASTRAVA_SHUTDOWN_STARTED", {
+  logger.warn("Vantage_SHUTDOWN_STARTED", {
     signal
   });
 
   const forceShutdown = setTimeout(() => {
-    logger.error("ASTRAVA_FORCE_SHUTDOWN");
+    logger.error("Vantage_FORCE_SHUTDOWN");
     process.exit(1);
   }, 15000);
 
@@ -74,17 +70,15 @@ const shutdown = async (signal) => {
     });
 
     await Promise.all([
-      closeQueues(),
       disconnectDatabase(),
-      disconnectRedis()
     ]);
 
-    logger.info("ASTRAVA_SHUTDOWN_COMPLETED");
+    logger.info("Vantage_SHUTDOWN_COMPLETED");
 
     clearTimeout(forceShutdown);
     process.exitCode = 0;
   } catch (error) {
-    logger.error("ASTRAVA_SHUTDOWN_FAILED", {
+    logger.error("Vantage_SHUTDOWN_FAILED", {
       message: error.message
     });
 
@@ -96,7 +90,7 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 process.on("uncaughtException", (error) => {
-  logger.error("ASTRAVA_UNCAUGHT_EXCEPTION", {
+  logger.error("Vantage_UNCAUGHT_EXCEPTION", {
     message: error.message,
     stack: error.stack
   });
@@ -105,7 +99,7 @@ process.on("uncaughtException", (error) => {
 });
 
 process.on("unhandledRejection", (reason) => {
-  logger.error("ASTRAVA_UNHANDLED_REJECTION", {
+  logger.error("Vantage_UNHANDLED_REJECTION", {
     reason:
       reason instanceof Error
         ? reason.message
