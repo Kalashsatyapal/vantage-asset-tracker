@@ -1,0 +1,39 @@
+export const ASSET_STATUS = Object.freeze({
+  AVAILABLE: "AVAILABLE",
+  ALLOCATED: "ALLOCATED",
+  MAINTENANCE: "MAINTENANCE",
+  RETIRED: "RETIRED"
+});
+
+export const ALLOCATION_STATUS = Object.freeze({
+  ACTIVE: "ACTIVE",
+  RETURN_REQUESTED: "RETURN_REQUESTED",
+  RETURNED: "RETURNED"
+});
+
+export const RETURN_STATUS = Object.freeze({
+  PENDING: "PENDING",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED"
+});
+
+export const ASSET_CONDITION = Object.freeze({
+  GOOD: "GOOD",
+  DAMAGED: "DAMAGED",
+  CRITICAL: "CRITICAL"
+});
+
+export const MAINTENANCE_PRIORITY = Object.freeze({
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+  CRITICAL: "CRITICAL"
+});
+
+export const MAINTENANCE_STATUS = Object.freeze({
+  OPEN: "OPEN",
+  ASSIGNED: "ASSIGNED",
+  IN_PROGRESS: "IN_PROGRESS",
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED"
+});
