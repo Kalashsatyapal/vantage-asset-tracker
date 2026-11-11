@@ -1,11 +1,13 @@
+
 import { Transaction } from "sequelize";
 import sequelize from "../../../config/database.js";
 
 import {
   Employee,
+  Department,
   Asset,
-  AssetAllocation,
   AssetTransfer,
+  AssetAllocation,
   AssetVerification,
   Notification,
   SoftwareLicense,
@@ -15,33 +17,23 @@ import {
 import { recordAudit } from "./auditService.js";
 
 import {
-  ALLOCATION_STATUS,
-  ASSET_STATUS,
-  ASSET_CONDITION
-} from "../constants/assetLifecycleConstants.js";
-
-import {
   TRANSFER_STATUS,
   VERIFICATION_STATUS,
   LICENSE_ASSIGNMENT_STATUS,
-  NOTIFICATION_STATUS
+  NOTIFICATION_TYPES
 } from "../constants/employeeOperationsConstants.js";
 
 const txOptions = {
   isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED
 };
 
-function actorId(req) {
-  return req.user.id;
-}
+const actorId = (req) => req.user.id;
 
-function metadata(req) {
-  return {
-    requestId: req.requestId ?? null,
-    ipAddress: req.ip ?? null,
-    userAgent: req.get("user-agent") ?? null
-  };
-}
+const requestMetadata = (req) => ({
+  requestId: req.requestId ?? null,
+  ipAddress: req.ip ?? null,
+  userAgent: req.get("user-agent") ?? null
+});
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -53,24 +45,30 @@ async function notify({
   employeeId,
   title,
   message,
-  type = "GENERAL",
+  type,
   transaction
 }) {
-  return Notification.create({
-    employeeId,
-    title,
-    message,
-    type,
-    status: NOTIFICATION_STATUS.UNREAD
-  }, { transaction });
+  return Notification.create(
+    {
+      employeeId,
+      title,
+      message,
+      type,
+      isRead: false
+    },
+    { transaction }
+  );
 }
-
-/* ---------------- ASSET TRANSFER ---------------- */
-
 export async function requestTransfer(req, data) {
   const transaction = await sequelize.transaction(txOptions);
 
   try {
+    const employee = await Employee.findByPk(actorId(req), { transaction });
+
+    if (!employee || employee.employmentStatus !== "ACTIVE") {
+      fail("Active employee not found", 403);
+    }
+
     const asset = await Asset.findByPk(data.assetId, {
       transaction,
       lock: transaction.LOCK.UPDATE
@@ -78,27 +76,24 @@ export async function requestTransfer(req, data) {
 
     if (!asset) fail("Asset not found", 404);
 
-    const allocation = await AssetAllocation.findOne({
-      where: {
-        assetId: asset.id,
-        employeeId: actorId(req),
-        status: ALLOCATION_STATUS.ACTIVE
-      },
-      transaction,
-      lock: transaction.LOCK.UPDATE
-    });
-
-    if (!allocation) {
-      fail("You do not have an active allocation for this asset", 403);
+    if (!asset.departmentId || asset.departmentId !== employee.departmentId) {
+      fail("You can request transfer only for an asset in your department", 403);
     }
 
-    const targetEmployee = await Employee.findByPk(
-      data.targetEmployeeId,
-      { transaction }
-    );
+    if (!asset.isActive || ["RETIRED", "LOST"].includes(asset.status)) {
+      fail("This asset cannot be transferred", 409);
+    }
 
-    if (!targetEmployee || targetEmployee.status !== "ACTIVE") {
-      fail("Target employee is not active", 404);
+    const destination = await Department.findByPk(data.toDepartmentId, {
+      transaction
+    });
+
+    if (!destination || !destination.isActive) {
+      fail("Destination department is not active", 404);
+    }
+
+    if (destination.id === asset.departmentId) {
+      fail("Asset already belongs to this department", 400);
     }
 
     const pending = await AssetTransfer.findOne({
@@ -109,41 +104,40 @@ export async function requestTransfer(req, data) {
       transaction
     });
 
-    if (pending) {
-      fail("A transfer request is already pending", 409);
-    }
+    if (pending) fail("A pending transfer already exists for this asset", 409);
 
-    const transfer = await AssetTransfer.create({
-      assetId: asset.id,
-      fromEmployeeId: actorId(req),
-      toEmployeeId: targetEmployee.id,
-      requestedBy: actorId(req),
-      reason: data.reason.trim(),
-      status: TRANSFER_STATUS.PENDING,
-      requestedAt: new Date()
-    }, { transaction });
+    const transfer = await AssetTransfer.create(
+      {
+        assetId: asset.id,
+        requestedBy: employee.id,
+        fromDepartmentId: asset.departmentId,
+        toDepartmentId: destination.id,
+        requestReason: data.requestReason.trim(),
+        status: TRANSFER_STATUS.PENDING
+      },
+      { transaction }
+    );
 
     await notify({
-      employeeId: targetEmployee.id,
-      title: "Asset transfer requested",
-      message: `An asset transfer request has been submitted for asset ${asset.assetTag}.`,
-      type: "ASSET_TRANSFER",
+      employeeId: employee.id,
+      title: "Asset transfer request submitted",
+      message: `Transfer request for ${asset.assetTag} to ${destination.name} was submitted.`,
+      type: NOTIFICATION_TYPES.TRANSFER,
       transaction
     });
 
     await recordAudit({
-      actorId: actorId(req),
+      actorId: employee.id,
       action: "ASSET_TRANSFER_REQUESTED",
       entityType: "AssetTransfer",
       entityId: transfer.id,
-      previousValues: null,
       newValues: {
         assetId: asset.id,
-        fromEmployeeId: actorId(req),
-        toEmployeeId: targetEmployee.id,
+        fromDepartmentId: asset.departmentId,
+        toDepartmentId: destination.id,
         status: transfer.status
       },
-      ...metadata(req),
+      ...requestMetadata(req),
       transaction
     });
 
@@ -155,7 +149,7 @@ export async function requestTransfer(req, data) {
   }
 }
 
-export async function processTransfer(req, transferId, decision) {
+export async function processTransfer(req, transferId, decision, rejectionReason) {
   const transaction = await sequelize.transaction(txOptions);
 
   try {
@@ -173,119 +167,63 @@ export async function processTransfer(req, transferId, decision) {
       lock: transaction.LOCK.UPDATE
     });
 
-    if (!asset || asset.status !== ASSET_STATUS.ALLOCATED) {
-      fail("Asset is not in an allocatable state", 409);
-    }
-
-    const sourceAllocation = await AssetAllocation.findOne({
-      where: {
-        assetId: transfer.assetId,
-        employeeId: transfer.fromEmployeeId,
-        status: ALLOCATION_STATUS.ACTIVE
-      },
-      transaction,
-      lock: transaction.LOCK.UPDATE
-    });
-
-    if (!sourceAllocation) {
-      fail("Source employee allocation is no longer active", 409);
+    if (!asset || asset.departmentId !== transfer.fromDepartmentId) {
+      fail("Asset department has changed; transfer cannot be processed", 409);
     }
 
     if (decision === "REJECT") {
       transfer.status = TRANSFER_STATUS.REJECTED;
-      transfer.processedBy = actorId(req);
-      transfer.processedAt = new Date();
+      transfer.approvedBy = actorId(req);
+      transfer.approvedAt = new Date();
+      transfer.rejectionReason = rejectionReason?.trim() || null;
 
       await transfer.save({ transaction });
 
       await notify({
-        employeeId: transfer.fromEmployeeId,
+        employeeId: transfer.requestedBy,
         title: "Asset transfer rejected",
-        message: `Your transfer request for asset ${asset.assetTag} was rejected.`,
-        type: "ASSET_TRANSFER",
+        message: `Transfer request for ${asset.assetTag} was rejected.`,
+        type: NOTIFICATION_TYPES.TRANSFER,
         transaction
       });
+    } else if (decision === "APPROVE") {
+      transfer.status = TRANSFER_STATUS.APPROVED;
+      transfer.approvedBy = actorId(req);
+      transfer.approvedAt = new Date();
 
-      await transaction.commit();
-      return transfer;
-    }
+      asset.departmentId = transfer.toDepartmentId;
+      await asset.save({ transaction });
 
-    if (decision !== "APPROVE") {
+      transfer.status = TRANSFER_STATUS.COMPLETED;
+      transfer.completedAt = new Date();
+
+      await transfer.save({ transaction });
+
+      await notify({
+        employeeId: transfer.requestedBy,
+        title: "Asset transfer completed",
+        message: `Asset ${asset.assetTag} has been transferred to the requested department.`,
+        type: NOTIFICATION_TYPES.TRANSFER,
+        transaction
+      });
+    } else {
       fail("Decision must be APPROVE or REJECT");
     }
 
-    const targetEmployee = await Employee.findByPk(
-      transfer.toEmployeeId,
-      { transaction, lock: transaction.LOCK.UPDATE }
-    );
-
-    if (!targetEmployee || targetEmployee.status !== "ACTIVE") {
-      fail("Target employee is no longer active", 409);
-    }
-
-    const existingTargetAllocation = await AssetAllocation.findOne({
-      where: {
-        assetId: transfer.assetId,
-        employeeId: transfer.toEmployeeId,
-        status: [
-          ALLOCATION_STATUS.ACTIVE,
-          ALLOCATION_STATUS.RETURN_REQUESTED
-        ]
-      },
-      transaction
-    });
-
-    if (existingTargetAllocation) {
-      fail("Target employee already has an active allocation for this asset", 409);
-    }
-
-    sourceAllocation.status = ALLOCATION_STATUS.RETURNED;
-    await sourceAllocation.save({ transaction });
-
-    const newAllocation = await AssetAllocation.create({
-      assetId: transfer.assetId,
-      employeeId: transfer.toEmployeeId,
-      allocatedBy: actorId(req),
-      allocatedAt: new Date(),
-      status: ALLOCATION_STATUS.ACTIVE
-    }, { transaction });
-
-    transfer.status = TRANSFER_STATUS.COMPLETED;
-    transfer.processedBy = actorId(req);
-    transfer.processedAt = new Date();
-
-    await transfer.save({ transaction });
-
-    await notify({
-      employeeId: transfer.fromEmployeeId,
-      title: "Asset transfer completed",
-      message: `Asset ${asset.assetTag} has been transferred to another employee.`,
-      type: "ASSET_TRANSFER",
-      transaction
-    });
-
-    await notify({
-      employeeId: transfer.toEmployeeId,
-      title: "Asset assigned to you",
-      message: `Asset ${asset.assetTag} has been assigned to you.`,
-      type: "ASSET_TRANSFER",
-      transaction
-    });
-
     await recordAudit({
       actorId: actorId(req),
-      action: "ASSET_TRANSFER_COMPLETED",
+      action: `ASSET_TRANSFER_${decision}`,
       entityType: "AssetTransfer",
       entityId: transfer.id,
       previousValues: {
-        employeeId: transfer.fromEmployeeId
+        departmentId: transfer.fromDepartmentId,
+        status: TRANSFER_STATUS.PENDING
       },
       newValues: {
-        employeeId: transfer.toEmployeeId,
-        allocationId: newAllocation.id,
+        departmentId: asset.departmentId,
         status: transfer.status
       },
-      ...metadata(req),
+      ...requestMetadata(req),
       transaction
     });
 
@@ -296,64 +234,67 @@ export async function processTransfer(req, transferId, decision) {
     throw error;
   }
 }
-
-/* ---------------- ASSET VERIFICATION ---------------- */
-
 export async function submitVerification(req, data) {
   const transaction = await sequelize.transaction(txOptions);
 
   try {
-    const allocation = await AssetAllocation.findOne({
+    const asset = await Asset.findByPk(data.assetId, { transaction });
+
+    if (!asset) fail("Asset not found", 404);
+
+    const existingAllocation = await AssetAllocation.findOne({
       where: {
-        assetId: data.assetId,
+        assetId: asset.id,
         employeeId: actorId(req),
-        status: [
-          ALLOCATION_STATUS.ACTIVE,
-          ALLOCATION_STATUS.RETURN_REQUESTED
-        ]
+        status: "ACTIVE"
       },
-      transaction,
-      lock: transaction.LOCK.UPDATE
+      transaction
     });
 
-    if (!allocation) {
-      fail("No active allocation found for this asset", 404);
+    if (!existingAllocation) {
+      fail("You do not have an active allocation for this asset", 403);
     }
 
     const existing = await AssetVerification.findOne({
       where: {
-        assetId: data.assetId,
+        assetId: asset.id,
         employeeId: actorId(req),
-        status: VERIFICATION_STATUS.PENDING
+        verificationPeriod: data.verificationPeriod
       },
       transaction
     });
 
     if (existing) {
-      fail("A verification is already pending", 409);
+      fail("Verification already submitted for this period", 409);
     }
 
-    const verification = await AssetVerification.create({
-      assetId: data.assetId,
-      employeeId: actorId(req),
-      condition: data.condition,
-      notes: data.notes?.trim() || null,
-      status: VERIFICATION_STATUS.PENDING,
-      submittedAt: new Date()
-    }, { transaction });
+    const verification = await AssetVerification.create(
+      {
+        assetId: asset.id,
+        employeeId: actorId(req),
+        verificationPeriod: data.verificationPeriod.trim(),
+        reportedCondition: data.reportedCondition,
+        employeeRemarks: data.employeeRemarks?.trim() || null,
+        status:
+          data.reportedCondition === "MISSING"
+            ? VERIFICATION_STATUS.MISSING
+            : VERIFICATION_STATUS.PENDING
+      },
+      { transaction }
+    );
 
     await recordAudit({
       actorId: actorId(req),
       action: "ASSET_VERIFICATION_SUBMITTED",
       entityType: "AssetVerification",
       entityId: verification.id,
-      previousValues: null,
       newValues: {
-        assetId: data.assetId,
-        condition: data.condition,
+        assetId: asset.id,
+        verificationPeriod: verification.verificationPeriod,
+        reportedCondition: verification.reportedCondition,
         status: verification.status
       },
-      ...metadata(req),
+      ...requestMetadata(req),
       transaction
     });
 
@@ -365,7 +306,12 @@ export async function submitVerification(req, data) {
   }
 }
 
-export async function processVerification(req, verificationId, decision, notes) {
+export async function processVerification(
+  req,
+  verificationId,
+  decision,
+  inspectionRemarks
+) {
   const transaction = await sequelize.transaction(txOptions);
 
   try {
@@ -378,30 +324,31 @@ export async function processVerification(req, verificationId, decision, notes) 
       fail("Pending verification not found", 404);
     }
 
-    if (!["VERIFY", "FLAG"].includes(decision)) {
-      fail("Decision must be VERIFY or FLAG");
+    if (!["CONFIRMED", "DISCREPANCY"].includes(decision)) {
+      fail("Decision must be CONFIRMED or DISCREPANCY");
     }
 
-    verification.status =
-      decision === "VERIFY"
-        ? VERIFICATION_STATUS.VERIFIED
-        : VERIFICATION_STATUS.FLAGGED;
+    const previousStatus = verification.status;
 
+    verification.status = decision;
     verification.verifiedBy = actorId(req);
     verification.verifiedAt = new Date();
 
-    if (notes !== undefined) {
-      verification.notes = notes.trim();
+    if (decision === "DISCREPANCY" && inspectionRemarks?.trim()) {
+      verification.employeeRemarks = [
+        verification.employeeRemarks,
+        `Manager remarks: ${inspectionRemarks.trim()}`
+      ].filter(Boolean).join("\n");
     }
 
     await verification.save({ transaction });
 
-    if (decision === "FLAG") {
+    if (decision === "DISCREPANCY") {
       await notify({
         employeeId: verification.employeeId,
-        title: "Asset verification flagged",
-        message: "Your asset verification requires further attention.",
-        type: "ASSET_VERIFICATION",
+        title: "Asset verification discrepancy",
+        message: "Your asset verification requires attention.",
+        type: NOTIFICATION_TYPES.ASSET,
         transaction
       });
     }
@@ -411,9 +358,12 @@ export async function processVerification(req, verificationId, decision, notes) 
       action: `ASSET_VERIFICATION_${decision}`,
       entityType: "AssetVerification",
       entityId: verification.id,
-      previousValues: { status: VERIFICATION_STATUS.PENDING },
-      newValues: { status: verification.status },
-      ...metadata(req),
+      previousValues: { status: previousStatus },
+      newValues: {
+        status: verification.status,
+        verifiedBy: verification.verifiedBy
+      },
+      ...requestMetadata(req),
       transaction
     });
 
@@ -424,61 +374,80 @@ export async function processVerification(req, verificationId, decision, notes) 
     throw error;
   }
 }
-
-/* ---------------- SOFTWARE LICENSES ---------------- */
-
-export async function requestSoftwareLicense(req, data) {
+export async function assignSoftwareLicense(req, data) {
   const transaction = await sequelize.transaction(txOptions);
 
   try {
-    const license = await SoftwareLicense.findByPk(
-      data.softwareLicenseId,
-      { transaction, lock: transaction.LOCK.UPDATE }
-    );
+    const [license, employee] = await Promise.all([
+      SoftwareLicense.findByPk(data.licenseId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      }),
+      Employee.findByPk(data.employeeId, { transaction })
+    ]);
 
     if (!license) fail("Software license not found", 404);
 
+    if (!employee || employee.employmentStatus !== "ACTIVE") {
+      fail("Active employee not found", 404);
+    }
+
+    if (license.status !== "ACTIVE") {
+      fail("Software license is not active", 409);
+    }
+
+    if (license.expiryDate && license.expiryDate < new Date().toISOString().slice(0, 10)) {
+      fail("Software license has expired", 409);
+    }
+
+    if (license.availableSeats < 1) {
+      fail("No available seats for this software license", 409);
+    }
+
     const existing = await LicenseAssignment.findOne({
       where: {
-        softwareLicenseId: license.id,
-        employeeId: actorId(req),
+        licenseId: license.id,
+        employeeId: employee.id,
         status: LICENSE_ASSIGNMENT_STATUS.ACTIVE
       },
       transaction
     });
 
-    if (existing) {
-      fail("You already have this software license assigned", 409);
-    }
+    if (existing) fail("Employee already has this license", 409);
 
-    const assignment = await LicenseAssignment.create({
-      softwareLicenseId: license.id,
-      employeeId: actorId(req),
-      requestedBy: actorId(req),
-      reason: data.reason.trim(),
-      status: "PENDING",
-      requestedAt: new Date()
-    }, { transaction });
+    const assignment = await LicenseAssignment.create(
+      {
+        licenseId: license.id,
+        employeeId: employee.id,
+        assignedBy: actorId(req),
+        status: LICENSE_ASSIGNMENT_STATUS.ACTIVE
+      },
+      { transaction }
+    );
+
+    license.availableSeats -= 1;
+    await license.save({ transaction });
 
     await notify({
-      employeeId: actorId(req),
-      title: "Software license request submitted",
-      message: `Your request for ${license.name} has been submitted.`,
-      type: "LICENSE",
+      employeeId: employee.id,
+      title: "Software license assigned",
+      message: `${license.softwareName} has been assigned to your account.`,
+      type: NOTIFICATION_TYPES.LICENSE,
       transaction
     });
 
     await recordAudit({
       actorId: actorId(req),
-      action: "SOFTWARE_LICENSE_REQUESTED",
+      action: "SOFTWARE_LICENSE_ASSIGNED",
       entityType: "LicenseAssignment",
       entityId: assignment.id,
-      previousValues: null,
       newValues: {
-        softwareLicenseId: license.id,
-        status: assignment.status
+        licenseId: license.id,
+        employeeId: employee.id,
+        status: assignment.status,
+        availableSeats: license.availableSeats
       },
-      ...metadata(req),
+      ...requestMetadata(req),
       transaction
     });
 
@@ -490,7 +459,7 @@ export async function requestSoftwareLicense(req, data) {
   }
 }
 
-export async function processLicenseRequest(req, assignmentId, decision) {
+export async function revokeSoftwareLicense(req, assignmentId) {
   const transaction = await sequelize.transaction(txOptions);
 
   try {
@@ -499,59 +468,46 @@ export async function processLicenseRequest(req, assignmentId, decision) {
       lock: transaction.LOCK.UPDATE
     });
 
-    if (!assignment || assignment.status !== "PENDING") {
-      fail("Pending license request not found", 404);
+    if (!assignment || assignment.status !== LICENSE_ASSIGNMENT_STATUS.ACTIVE) {
+      fail("Active license assignment not found", 404);
     }
 
-    const license = await SoftwareLicense.findByPk(
-      assignment.softwareLicenseId,
-      { transaction, lock: transaction.LOCK.UPDATE }
-    );
+    const license = await SoftwareLicense.findByPk(assignment.licenseId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
 
     if (!license) fail("Software license not found", 404);
 
-    if (decision === "APPROVE") {
-      const activeCount = await LicenseAssignment.count({
-        where: {
-          softwareLicenseId: license.id,
-          status: LICENSE_ASSIGNMENT_STATUS.ACTIVE
-        },
-        transaction
-      });
-
-      if (activeCount >= license.totalSeats) {
-        fail("No available seats for this software license", 409);
-      }
-
-      assignment.status = LICENSE_ASSIGNMENT_STATUS.ACTIVE;
-      assignment.approvedBy = actorId(req);
-      assignment.approvedAt = new Date();
-    } else if (decision === "REJECT") {
-      assignment.status = "REJECTED";
-      assignment.approvedBy = actorId(req);
-      assignment.approvedAt = new Date();
-    } else {
-      fail("Decision must be APPROVE or REJECT");
-    }
-
+    assignment.status = LICENSE_ASSIGNMENT_STATUS.REVOKED;
+    assignment.revokedAt = new Date();
     await assignment.save({ transaction });
+
+    license.availableSeats = Math.min(
+      license.totalSeats,
+      license.availableSeats + 1
+    );
+    await license.save({ transaction });
 
     await notify({
       employeeId: assignment.employeeId,
-      title: `Software license request ${decision.toLowerCase()}d`,
-      message: `Your software license request has been ${decision.toLowerCase()}d.`,
-      type: "LICENSE",
+      title: "Software license revoked",
+      message: `${license.softwareName} access has been revoked.`,
+      type: NOTIFICATION_TYPES.LICENSE,
       transaction
     });
 
     await recordAudit({
       actorId: actorId(req),
-      action: `SOFTWARE_LICENSE_${decision}`,
+      action: "SOFTWARE_LICENSE_REVOKED",
       entityType: "LicenseAssignment",
       entityId: assignment.id,
-      previousValues: { status: "PENDING" },
-      newValues: { status: assignment.status },
-      ...metadata(req),
+      previousValues: { status: LICENSE_ASSIGNMENT_STATUS.ACTIVE },
+      newValues: {
+        status: assignment.status,
+        availableSeats: license.availableSeats
+      },
+      ...requestMetadata(req),
       transaction
     });
 
@@ -563,8 +519,27 @@ export async function processLicenseRequest(req, assignmentId, decision) {
   }
 }
 
-/* ---------------- NOTIFICATIONS ---------------- */
-
+export async function getMyLicenses(req) {
+  return LicenseAssignment.findAll({
+    where: {
+      employeeId: actorId(req),
+      status: LICENSE_ASSIGNMENT_STATUS.ACTIVE
+    },
+    include: [{
+      model: SoftwareLicense,
+      as: "license",
+      attributes: [
+        "id",
+        "softwareName",
+        "vendorName",
+        "licenseType",
+        "expiryDate",
+        "status"
+      ]
+    }],
+    order: [["assignedAt", "DESC"]]
+  });
+}
 export async function getMyNotifications(req, { page = 1, limit = 20 }) {
   const safePage = Math.max(Number(page) || 1, 1);
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
@@ -587,10 +562,11 @@ export async function markNotificationRead(req, notificationId) {
 
   if (!notification) fail("Notification not found", 404);
 
-  notification.status = NOTIFICATION_STATUS.READ;
-  notification.readAt = new Date();
-
-  await notification.save();
+  if (!notification.isRead) {
+    notification.isRead = true;
+    notification.readAt = new Date();
+    await notification.save();
+  }
 
   return notification;
 }

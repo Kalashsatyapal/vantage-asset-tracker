@@ -1,3 +1,4 @@
+
 import { Router } from "express";
 
 import { authenticate } from "../middleware/authenticate.js";
@@ -6,7 +7,7 @@ import { authorize } from "../middleware/authorize.js";
 import {
   validateTransferRequest,
   validateVerification,
-  validateLicenseRequest
+  validateLicenseAssignment
 } from "../validators/employeeOperationsValidator.js";
 
 import {
@@ -14,16 +15,14 @@ import {
   decideTransfer,
   createVerification,
   decideVerification,
-  createLicenseRequest,
-  decideLicenseRequest,
+  assignLicense,
+  revokeLicense,
+  getMyLicenses,
   getNotifications,
   readNotification
 } from "../controllers/employeeOperationsController.js";
-
 const router = Router();
-
 router.use(authenticate);
-
 router.post(
   "/transfers",
   authorize("EMPLOYEE"),
@@ -36,7 +35,6 @@ router.patch(
   authorize("ASSET_MANAGER", "ADMIN"),
   decideTransfer
 );
-
 router.post(
   "/verifications",
   authorize("EMPLOYEE"),
@@ -49,24 +47,25 @@ router.patch(
   authorize("ASSET_MANAGER", "ADMIN"),
   decideVerification
 );
+router.get(
+  "/licenses/my",
+  authorize("EMPLOYEE", "ASSET_MANAGER", "ADMIN"),
+  getMyLicenses
+);
 
 router.post(
-  "/licenses/requests",
-  authorize("EMPLOYEE"),
-  validateLicenseRequest,
-  createLicenseRequest
+  "/licenses/assignments",
+  authorize("ASSET_MANAGER", "ADMIN"),
+  validateLicenseAssignment,
+  assignLicense
 );
 
 router.patch(
-  "/licenses/requests/:assignmentId/decision",
+  "/licenses/assignments/:assignmentId/revoke",
   authorize("ASSET_MANAGER", "ADMIN"),
-  decideLicenseRequest
+  revokeLicense
 );
-
-router.get(
-  "/notifications",
-  getNotifications
-);
+router.get("/notifications", getNotifications);
 
 router.patch(
   "/notifications/:notificationId/read",

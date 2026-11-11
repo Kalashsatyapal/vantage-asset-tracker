@@ -1,20 +1,19 @@
-const validText = (value, min = 2, max = 1000) =>
+
+const validText = (value, min = 1, max = 1000) =>
   typeof value === "string" &&
   value.trim().length >= min &&
   value.trim().length <= max;
 
 export function validateTransferRequest(req, res, next) {
-  const { assetId, targetEmployeeId, reason } = req.body;
+  const { assetId, toDepartmentId, requestReason } = req.body;
 
-  if (!assetId || !targetEmployeeId || !validText(reason, 5, 1000)) {
+  if (
+    !assetId ||
+    !toDepartmentId ||
+    !validText(requestReason, 5, 1000)
+  ) {
     return res.status(400).json({
-      message: "assetId, targetEmployeeId and a valid reason are required"
-    });
-  }
-
-  if (targetEmployeeId === req.user.id) {
-    return res.status(400).json({
-      message: "You cannot transfer an asset to yourself"
+      message: "assetId, toDepartmentId and requestReason are required"
     });
   }
 
@@ -22,30 +21,40 @@ export function validateTransferRequest(req, res, next) {
 }
 
 export function validateVerification(req, res, next) {
-  const { condition, notes } = req.body;
-  const allowedConditions = ["GOOD", "DAMAGED", "CRITICAL"];
+  const { assetId, verificationPeriod, reportedCondition, employeeRemarks } =
+    req.body;
 
-  if (!allowedConditions.includes(condition)) {
+  const allowed = ["NEW", "GOOD", "FAIR", "DAMAGED", "MISSING"];
+
+  if (
+    !assetId ||
+    !validText(verificationPeriod, 1, 20) ||
+    !allowed.includes(reportedCondition)
+  ) {
     return res.status(400).json({
-      message: "Invalid verification condition"
+      message:
+        "assetId, verificationPeriod and a valid reportedCondition are required"
     });
   }
 
-  if (notes !== undefined && !validText(notes, 0, 1000)) {
+  if (
+    employeeRemarks !== undefined &&
+    !validText(employeeRemarks, 0, 1000)
+  ) {
     return res.status(400).json({
-      message: "Notes must not exceed 1000 characters"
+      message: "employeeRemarks must not exceed 1000 characters"
     });
   }
 
   next();
 }
 
-export function validateLicenseRequest(req, res, next) {
-  const { softwareLicenseId, reason } = req.body;
+export function validateLicenseAssignment(req, res, next) {
+  const { licenseId, employeeId } = req.body;
 
-  if (!softwareLicenseId || !validText(reason, 5, 1000)) {
+  if (!licenseId || !employeeId) {
     return res.status(400).json({
-      message: "softwareLicenseId and a valid reason are required"
+      message: "licenseId and employeeId are required"
     });
   }
 

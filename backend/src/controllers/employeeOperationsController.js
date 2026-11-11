@@ -1,3 +1,4 @@
+
 import * as service from "../services/employeeOperationsService.js";
 
 function handleError(res, error) {
@@ -9,9 +10,8 @@ function handleError(res, error) {
 export async function createTransfer(req, res) {
   try {
     const transfer = await service.requestTransfer(req, req.body);
-
     return res.status(201).json({
-      message: "Transfer request submitted",
+      message: "Department transfer request submitted",
       transfer
     });
   } catch (error) {
@@ -24,11 +24,12 @@ export async function decideTransfer(req, res) {
     const transfer = await service.processTransfer(
       req,
       req.params.transferId,
-      req.body.decision
+      req.body.decision,
+      req.body.rejectionReason
     );
 
     return res.status(200).json({
-      message: "Transfer request processed",
+      message: "Department transfer processed",
       transfer
     });
   } catch (error) {
@@ -39,7 +40,6 @@ export async function decideTransfer(req, res) {
 export async function createVerification(req, res) {
   try {
     const verification = await service.submitVerification(req, req.body);
-
     return res.status(201).json({
       message: "Asset verification submitted",
       verification
@@ -55,7 +55,7 @@ export async function decideVerification(req, res) {
       req,
       req.params.verificationId,
       req.body.decision,
-      req.body.notes
+      req.body.inspectionRemarks
     );
 
     return res.status(200).json({
@@ -67,12 +67,11 @@ export async function decideVerification(req, res) {
   }
 }
 
-export async function createLicenseRequest(req, res) {
+export async function assignLicense(req, res) {
   try {
-    const assignment = await service.requestSoftwareLicense(req, req.body);
-
+    const assignment = await service.assignSoftwareLicense(req, req.body);
     return res.status(201).json({
-      message: "Software license request submitted",
+      message: "Software license assigned",
       assignment
     });
   } catch (error) {
@@ -80,18 +79,26 @@ export async function createLicenseRequest(req, res) {
   }
 }
 
-export async function decideLicenseRequest(req, res) {
+export async function revokeLicense(req, res) {
   try {
-    const assignment = await service.processLicenseRequest(
+    const assignment = await service.revokeSoftwareLicense(
       req,
-      req.params.assignmentId,
-      req.body.decision
+      req.params.assignmentId
     );
 
     return res.status(200).json({
-      message: "Software license request processed",
+      message: "Software license revoked",
       assignment
     });
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+export async function getMyLicenses(req, res) {
+  try {
+    const licenses = await service.getMyLicenses(req);
+    return res.status(200).json({ licenses });
   } catch (error) {
     return handleError(res, error);
   }
@@ -100,7 +107,6 @@ export async function decideLicenseRequest(req, res) {
 export async function getNotifications(req, res) {
   try {
     const result = await service.getMyNotifications(req, req.query);
-
     return res.status(200).json({
       total: result.count,
       notifications: result.rows

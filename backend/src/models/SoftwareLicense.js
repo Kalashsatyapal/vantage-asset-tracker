@@ -1,7 +1,5 @@
-
 import { DataTypes } from "sequelize";
 import sequelize from "../../../config/database.js";
-
 const SoftwareLicense = sequelize.define(
   "SoftwareLicense",
   {
@@ -93,5 +91,4 @@ const SoftwareLicense = sequelize.define(
     }
   }
 );
-
 export default SoftwareLicense;

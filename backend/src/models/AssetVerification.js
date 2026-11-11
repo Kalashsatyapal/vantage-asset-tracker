@@ -1,7 +1,5 @@
-
 import { DataTypes } from "sequelize";
 import sequelize from "../../../config/database.js";
-
 const AssetVerification = sequelize.define(
   "AssetVerification",
   {
@@ -65,5 +63,4 @@ const AssetVerification = sequelize.define(
     ]
   }
 );
-
 export default AssetVerification;

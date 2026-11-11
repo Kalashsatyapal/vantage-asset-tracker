@@ -1,3 +1,4 @@
+
 import {
   ASSET_CONDITION,
   MAINTENANCE_PRIORITY
@@ -23,13 +24,16 @@ export function validateAllocation(req, res, next) {
 export function validateReturnRequest(req, res, next) {
   const { condition, notes } = req.body;
 
-  if (!Object.values(ASSET_CONDITION).includes(condition)) {
+  if (!["GOOD", "FAIR", "DAMAGED"].includes(condition)) {
     return res.status(400).json({
       message: "Invalid asset condition"
     });
   }
 
-  if (notes !== undefined && !isValidText(notes, 0, 1000)) {
+  if (
+    notes !== undefined &&
+    !isValidText(notes, 0, 1000)
+  ) {
     return res.status(400).json({
       message: "Notes must not exceed 1000 characters"
     });
@@ -39,11 +43,25 @@ export function validateReturnRequest(req, res, next) {
 }
 
 export function validateMaintenanceTicket(req, res, next) {
-  const { title, description, priority } = req.body;
+  const {
+    title,
+    description,
+    priority,
+    issueType
+  } = req.body;
 
-  if (!req.params.assetId ||
-      !isValidText(title, 3, 150) ||
-      !isValidText(description, 5, 2000)) {
+  const validIssueTypes = [
+    "HARDWARE",
+    "SOFTWARE",
+    "NETWORK",
+    "OTHER"
+  ];
+
+  if (
+    !req.params.assetId ||
+    !isValidText(title, 3, 180) ||
+    !isValidText(description, 5, 2000)
+  ) {
     return res.status(400).json({
       message: "Valid assetId, title and description are required"
     });
@@ -55,6 +73,15 @@ export function validateMaintenanceTicket(req, res, next) {
   ) {
     return res.status(400).json({
       message: "Invalid maintenance priority"
+    });
+  }
+
+  if (
+    issueType &&
+    !validIssueTypes.includes(issueType)
+  ) {
+    return res.status(400).json({
+      message: "Invalid maintenance issueType"
     });
   }
 

@@ -1,7 +1,5 @@
-
 import { DataTypes } from "sequelize";
 import sequelize from "../../../config/database.js";
-
 const LicenseAssignment = sequelize.define(
   "LicenseAssignment",
   {
@@ -51,5 +49,4 @@ const LicenseAssignment = sequelize.define(
     ]
   }
 );
-
 export default LicenseAssignment;

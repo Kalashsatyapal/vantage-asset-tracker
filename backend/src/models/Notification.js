@@ -1,7 +1,5 @@
-
 import { DataTypes } from "sequelize";
 import sequelize from "../../../config/database.js";
-
 const Notification = sequelize.define(
   "Notification",
   {
@@ -71,5 +69,4 @@ const Notification = sequelize.define(
     ]
   }
 );
-
 export default Notification;

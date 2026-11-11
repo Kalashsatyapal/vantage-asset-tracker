@@ -1,7 +1,5 @@
-
 import { DataTypes } from "sequelize";
 import sequelize from "../../../config/database.js";
-
 const AssetTransfer = sequelize.define(
   "AssetTransfer",
   {
@@ -83,5 +81,4 @@ const AssetTransfer = sequelize.define(
     ]
   }
 );
-
 export default AssetTransfer;

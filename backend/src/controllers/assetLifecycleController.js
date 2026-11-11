@@ -85,6 +85,7 @@ export async function inspectReturn(req, res) {
   }
 }
 
+
 export async function reportDamage(req, res) {
   try {
     const ticket = await lifecycleService.reportAssetDamage({
@@ -92,7 +93,8 @@ export async function reportDamage(req, res) {
       assetId: req.params.assetId,
       title: req.body.title,
       description: req.body.description,
-      priority: req.body.priority
+      priority: req.body.priority,
+      issueType: req.body.issueType
     });
 
     return res.status(201).json({
