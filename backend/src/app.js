@@ -12,7 +12,7 @@ import {
 import { requestContext } from "./middleware/requestContext.js";
 import { notFound } from "./middleware/notFound.js";
 import { errorHandler } from "./middleware/errorHandler.js";
-
+import reportingRoutes from "./routes/reportingRoutes.js";
 import healthRoutes from "./routes/healthRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
@@ -31,7 +31,7 @@ app.set(
 app.use(securityHeaders);
 app.use(corsOptions);
 app.use(requestContext);
-
+app.use("/api/reporting", reportingRoutes);
 app.use(express.json({
   limit: "1mb",
   strict: true
