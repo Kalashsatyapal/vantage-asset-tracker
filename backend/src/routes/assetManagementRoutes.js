@@ -1,4 +1,3 @@
-
 import { Router } from "express";
 
 import { authenticate } from "../middleware/authenticate.js";
@@ -40,8 +39,18 @@ router.patch("/assets/:assetId", validateAssetUpdate, updateAsset);
 router.patch("/assets/:assetId/retire", retireAsset);
 
 router.get("/master/:type", authorize("ADMIN"), listMasterData);
-router.post("/master/:type", authorize("ADMIN"), createMasterData);
-router.patch("/master/:type/:id", authorize("ADMIN"), updateMasterData);
+router.post(
+  "/master/:type",
+  authorize("ADMIN"),
+  validateMasterDataCreate,
+  createMasterData
+);
+router.patch(
+  "/master/:type/:id",
+  authorize("ADMIN"),
+  validateMasterDataUpdate,
+  updateMasterData
+);
 router.patch(
   "/master/:type/:id/deactivate",
   authorize("ADMIN"),
@@ -58,17 +67,5 @@ router.patch(
   "/maintenance-schedules/:scheduleId",
   updateMaintenanceSchedule
 );
-router.post(
-  "/master/:type",
-  authorize("ADMIN"),
-  validateMasterDataCreate,
-  createMasterData
-);
 
-router.patch(
-  "/master/:type/:id",
-  authorize("ADMIN"),
-  validateMasterDataUpdate,
-  updateMasterData
-);
 export default router;

@@ -44,7 +44,6 @@ app.use(express.urlencoded({
 
 app.use(cookieParser());
 app.use(globalRateLimiter);
-app.use("/api/asset-management", assetManagementRoutes);
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
@@ -60,7 +59,7 @@ app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/admin", adminEmployeeRoutes);
-
+app.use("/api/asset-management", assetManagementRoutes);
 app.use("/api/assets", assetLifecycleRoutes);
 app.use("/api/employee-operations", employeeOperationsRoutes);
 
